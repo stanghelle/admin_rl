@@ -1,0 +1,214 @@
+/**
+ * Sortable List Styles
+ * Styles for drag and drop reordering functionality
+ */
+
+/* Sortable container */
+.sortable-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+/* Individual sortable item */
+.sortable-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+    cursor: default;
+}
+
+.sortable-item:last-child {
+    margin-bottom: 0;
+}
+
+.sortable-item:hover {
+    border-color: var(--bs-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Drag handle */
+.drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-right: 0.75rem;
+    color: var(--bs-secondary);
+    cursor: grab;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.drag-handle:hover {
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), 0.1);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.drag-handle .material-icons-outlined {
+    font-size: 20px;
+}
+
+/* Dragging state */
+.sortable-item.dragging {
+    opacity: 0.9;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    transform: scale(1.02);
+    z-index: 1000;
+    border-color: var(--bs-primary);
+    background: var(--bs-body-bg);
+}
+
+/* Placeholder */
+.sortable-placeholder {
+    margin-bottom: 0.5rem;
+    border: 2px dashed var(--bs-primary);
+    border-radius: 0.375rem;
+    background: rgba(var(--bs-primary-rgb), 0.05);
+    visibility: visible !important;
+}
+
+/* Item content */
+.sortable-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.sortable-item-time {
+    font-weight: 600;
+    color: var(--bs-primary);
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+}
+
+.sortable-item-program {
+    color: var(--bs-body-color);
+    font-size: 0.95rem;
+}
+
+/* Editable fields */
+.sortable-item .editable-content {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+    display: inline-block;
+    min-width: 60px;
+}
+
+.sortable-item .editable-content:hover {
+    background: rgba(var(--bs-primary-rgb), 0.05);
+    border-color: var(--bs-border-color);
+}
+
+.sortable-item .editable-content:focus {
+    outline: none;
+    background: var(--bs-body-bg);
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.15);
+}
+
+/* Actions */
+.sortable-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0.75rem;
+    flex-shrink: 0;
+}
+
+.sortable-item-actions .btn {
+    padding: 0.25rem 0.5rem;
+}
+
+/* Mobile adjustments */
+@media (max-width: 576px) {
+    .sortable-item {
+        padding: 0.5rem 0.75rem;
+    }
+
+    .drag-handle {
+        width: 28px;
+        height: 28px;
+        margin-right: 0.5rem;
+    }
+
+    .sortable-item-time {
+        font-size: 0.85rem;
+    }
+
+    .sortable-item-program {
+        font-size: 0.9rem;
+    }
+}
+
+/* Empty state */
+.sortable-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--bs-secondary);
+}
+
+/* Sort indicator */
+.sort-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--bs-secondary);
+    margin-left: 0.5rem;
+}
+
+.sort-indicator .material-icons-outlined {
+    font-size: 16px;
+}
+
+/* Add program button */
+.add-program-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+}
+
+.add-program-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(var(--bs-primary-rgb), 0.25);
+}
+
+.add-program-btn .material-icons-outlined {
+    font-size: 18px;
+}
+
+/* Modal form improvements */
+#addProgramModal .form-control:focus {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.15);
+}
+
+/* Touch-friendly improvements for mobile */
+@media (max-width: 576px) {
+    .add-program-btn {
+        width: 100%;
+        justify-content: center;
+        margin-top: 1rem;
+    }
+
+    .sortable-item {
+        touch-action: none;
+    }
+}
