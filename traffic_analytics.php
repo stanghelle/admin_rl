@@ -217,6 +217,24 @@ $db = DB::getInstance();
             </div>
           </div>
         </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="card stat-card rounded-4 h-100">
+            <div class="card-body">
+              <div class="d-flex align-items-center gap-3">
+                <div class="stat-icon bg-danger bg-opacity-10">
+                  <span class="material-icons-outlined text-danger">public</span>
+                </div>
+                <div>
+                  <p class="mb-1 text-secondary small">Land (måned)</p>
+                  <h3 class="mb-0 fw-bold" id="statCountries">--</h3>
+                </div>
+              </div>
+              <div class="mt-2">
+                <small class="text-muted">Unike land</small>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Main Traffic Chart -->
@@ -293,6 +311,63 @@ $db = DB::getInstance();
           </div>
         </div>
 
+        <!-- Geo Stats Section -->
+        <div class="col-lg-6">
+          <div class="card rounded-4 h-100">
+            <div class="card-body">
+              <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="mb-0">Besøk per land</h6>
+                <select id="countryPeriod" class="form-select form-select-sm" style="width: auto;">
+                  <option value="today">I dag</option>
+                  <option value="week" selected>Denne uken</option>
+                  <option value="month">Denne måneden</option>
+                </select>
+              </div>
+              <div id="countryChart" style="height: 300px;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card rounded-4 h-100">
+            <div class="card-body">
+              <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="mb-0">Topp byer</h6>
+                <select id="cityPeriod" class="form-select form-select-sm" style="width: auto;">
+                  <option value="today">I dag</option>
+                  <option value="week" selected>Denne uken</option>
+                  <option value="month">Denne måneden</option>
+                </select>
+              </div>
+              <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="sticky-top bg-body">
+                    <tr>
+                      <th>By</th>
+                      <th>Land</th>
+                      <th class="text-end">Besøk</th>
+                    </tr>
+                  </thead>
+                  <tbody id="topCitiesBody">
+                    <tr>
+                      <td colspan="3" class="text-center text-muted py-4">Laster...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Country List -->
+        <div class="col-12">
+          <div class="card rounded-4">
+            <div class="card-body">
+              <h6 class="mb-3">Landfordeling</h6>
+              <div id="countryList" class="row g-2"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Hourly Heatmap -->
         <div class="col-12">
           <div class="card rounded-4">
@@ -330,6 +405,7 @@ $db = DB::getInstance();
   var deviceChart = null;
   var browserChart = null;
   var heatmapChart = null;
+  var countryChart = null;
 
   var refreshInterval = 30000; // 30 seconds
   var lastUpdate = new Date();
@@ -361,6 +437,16 @@ $db = DB::getInstance();
       loadTopPages($(this).val());
     });
 
+    // Country period change
+    $('#countryPeriod').on('change', function() {
+      loadCountryStats($(this).val());
+    });
+
+    // City period change
+    $('#cityPeriod').on('change', function() {
+      loadCityStats($(this).val());
+    });
+
     // Toggle auto-refresh
     $('#toggleAutoRefresh').on('click', function() {
       autoRefreshEnabled = !autoRefreshEnabled;
@@ -378,11 +464,14 @@ $db = DB::getInstance();
     loadStats('week', '#statWeek', '#statWeekChange');
     loadStats('month', '#statMonth', '#statMonthChange');
     loadUniqueVisitors();
+    loadCountriesCount();
     loadMainChart('daily');
     loadDeviceStats();
     loadBrowserStats();
     loadTopPages('week');
     loadHourlyHeatmap();
+    loadCountryStats('week');
+    loadCityStats('week');
     lastUpdate = new Date();
   }
 
@@ -392,6 +481,7 @@ $db = DB::getInstance();
     loadStats('week', '#statWeek', '#statWeekChange');
     loadStats('month', '#statMonth', '#statMonthChange');
     loadUniqueVisitors();
+    loadCountriesCount();
     lastUpdate = new Date();
     showRefreshAnimation();
   }
@@ -774,6 +864,133 @@ $db = DB::getInstance();
 
     heatmapChart = new ApexCharts(document.querySelector("#hourlyHeatmap"), options);
     heatmapChart.render();
+  }
+
+  function loadCountriesCount() {
+    $.ajax({
+      url: 'api/traffic.php?action=stats&period=month',
+      method: 'GET',
+      success: function(response) {
+        if (response.success) {
+          $('#statCountries').text(formatNumber(response.data.countries || 0));
+        }
+      }
+    });
+  }
+
+  function loadCountryStats(period) {
+    $.ajax({
+      url: 'api/traffic.php?action=countries&period=' + period + '&limit=10',
+      method: 'GET',
+      success: function(response) {
+        if (response.success && response.data.length > 0) {
+          renderCountryChart(response.data);
+          renderCountryList(response.data);
+        } else {
+          $('#countryChart').html('<p class="text-muted text-center py-5">Ingen geodata tilgjengelig</p>');
+          $('#countryList').html('<div class="col-12 text-center text-muted py-3">Ingen geodata tilgjengelig</div>');
+        }
+      }
+    });
+  }
+
+  function renderCountryChart(data) {
+    if (countryChart) {
+      countryChart.destroy();
+    }
+
+    var labels = data.map(function(d) { return d.flag + ' ' + d.country; });
+    var series = data.map(function(d) { return d.visits; });
+    var colors = ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#20c997', '#198754', '#0dcaf0'];
+
+    var options = {
+      series: series,
+      chart: {
+        type: 'donut',
+        height: 300
+      },
+      labels: labels,
+      colors: colors,
+      legend: {
+        position: 'right',
+        fontSize: '12px'
+      },
+      dataLabels: {
+        enabled: true,
+        formatter: function(val) { return Math.round(val) + '%'; }
+      },
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '55%',
+            labels: {
+              show: true,
+              name: { show: true, fontSize: '12px' },
+              value: { show: true, fontSize: '16px', fontWeight: 'bold' },
+              total: {
+                show: true,
+                label: 'Totalt',
+                fontSize: '12px'
+              }
+            }
+          }
+        }
+      },
+      responsive: [{
+        breakpoint: 480,
+        options: {
+          chart: { height: 280 },
+          legend: { position: 'bottom' }
+        }
+      }]
+    };
+
+    countryChart = new ApexCharts(document.querySelector("#countryChart"), options);
+    countryChart.render();
+  }
+
+  function renderCountryList(data) {
+    var html = '';
+    data.forEach(function(country) {
+      html += '<div class="col-6 col-md-4 col-lg-3">';
+      html += '<div class="d-flex align-items-center p-2 rounded bg-light">';
+      html += '<span class="me-2" style="font-size: 1.5rem;">' + country.flag + '</span>';
+      html += '<div class="flex-grow-1">';
+      html += '<div class="fw-semibold small">' + escapeHtml(country.country) + '</div>';
+      html += '<div class="text-muted small">' + formatNumber(country.visits) + ' besøk (' + country.percentage + '%)</div>';
+      html += '</div>';
+      html += '</div>';
+      html += '</div>';
+    });
+    $('#countryList').html(html);
+  }
+
+  function loadCityStats(period) {
+    $('#topCitiesBody').html('<tr><td colspan="3" class="text-center text-muted py-4">Laster...</td></tr>');
+
+    $.ajax({
+      url: 'api/traffic.php?action=cities&period=' + period + '&limit=15',
+      method: 'GET',
+      success: function(response) {
+        if (response.success && response.data.length > 0) {
+          renderCityList(response.data);
+        } else {
+          $('#topCitiesBody').html('<tr><td colspan="3" class="text-center text-muted py-4">Ingen bydata tilgjengelig</td></tr>');
+        }
+      }
+    });
+  }
+
+  function renderCityList(data) {
+    var html = '';
+    data.forEach(function(city) {
+      html += '<tr>';
+      html += '<td class="fw-semibold">' + escapeHtml(city.city) + '</td>';
+      html += '<td class="text-muted small">' + escapeHtml(city.country) + '</td>';
+      html += '<td class="text-end">' + formatNumber(city.visits) + '</td>';
+      html += '</tr>';
+    });
+    $('#topCitiesBody').html(html);
   }
 
   // Utility functions

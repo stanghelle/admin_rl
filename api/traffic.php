@@ -46,6 +46,15 @@ switch ($action) {
     case 'browsers':
         getBrowserStats($db);
         break;
+    case 'countries':
+        getCountryStats($db);
+        break;
+    case 'cities':
+        getCityStats($db);
+        break;
+    case 'geo_map':
+        getGeoMapData($db);
+        break;
     default:
         http_response_code(400);
         echo json_encode(['error' => 'Invalid action']);
@@ -66,7 +75,7 @@ function recordVisit($db) {
     $pageTitle = $_POST['page_title'] ?? '';
     $referrer = $_POST['referrer'] ?? $_SERVER['HTTP_REFERER'] ?? '';
     $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '';
+    $ipAddress = getClientIP();
     $sessionId = session_id() ?: uniqid('sess_', true);
 
     // Detect device type
@@ -109,8 +118,17 @@ function recordVisit($db) {
         $os = 'iOS';
     }
 
+    // Get geolocation data
+    $geoData = GeoIP::lookup($ipAddress);
+    $country = $geoData['country'] ?? null;
+    $countryCode = $geoData['country_code'] ?? null;
+    $region = $geoData['region'] ?? null;
+    $city = $geoData['city'] ?? null;
+    $latitude = $geoData['latitude'] ?? null;
+    $longitude = $geoData['longitude'] ?? null;
+
     try {
-        $result = $db->insert('website_traffic', [
+        $insertData = [
             'page_url' => substr($pageUrl, 0, 500),
             'page_title' => substr($pageTitle, 0, 255),
             'referrer' => substr($referrer, 0, 500),
@@ -119,14 +137,71 @@ function recordVisit($db) {
             'session_id' => $sessionId,
             'device_type' => $deviceType,
             'browser' => $browser,
-            'os' => $os
-        ]);
+            'os' => $os,
+            'country' => $country,
+            'city' => $city
+        ];
 
-        echo json_encode(['success' => true]);
+        // Add geo columns if they exist in the table
+        // These are optional for backwards compatibility
+        $insertData['country_code'] = $countryCode;
+        $insertData['region'] = $region;
+        $insertData['latitude'] = $latitude;
+        $insertData['longitude'] = $longitude;
+
+        $result = $db->insert('website_traffic', $insertData);
+
+        echo json_encode(['success' => true, 'geo' => $geoData]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(['error' => 'Failed to record visit']);
+        // Try without geo columns if they don't exist
+        try {
+            $result = $db->insert('website_traffic', [
+                'page_url' => substr($pageUrl, 0, 500),
+                'page_title' => substr($pageTitle, 0, 255),
+                'referrer' => substr($referrer, 0, 500),
+                'user_agent' => substr($userAgent, 0, 500),
+                'ip_address' => $ipAddress,
+                'session_id' => $sessionId,
+                'device_type' => $deviceType,
+                'browser' => $browser,
+                'os' => $os,
+                'country' => $country,
+                'city' => $city
+            ]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e2) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to record visit']);
+        }
     }
+}
+
+/**
+ * Get client's real IP address
+ */
+function getClientIP() {
+    $headers = [
+        'HTTP_CF_CONNECTING_IP',     // Cloudflare
+        'HTTP_X_FORWARDED_FOR',      // Proxy
+        'HTTP_X_REAL_IP',            // Nginx proxy
+        'HTTP_CLIENT_IP',            // Shared internet
+        'REMOTE_ADDR'                // Standard
+    ];
+
+    foreach ($headers as $header) {
+        if (!empty($_SERVER[$header])) {
+            $ip = $_SERVER[$header];
+            // Handle comma-separated list (X-Forwarded-For)
+            if (strpos($ip, ',') !== false) {
+                $ip = trim(explode(',', $ip)[0]);
+            }
+            if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                return $ip;
+            }
+        }
+    }
+
+    return $_SERVER['REMOTE_ADDR'] ?? '';
 }
 
 /**
@@ -153,6 +228,10 @@ function getTrafficStats($db) {
     $uniqueVisitors = $db->query("SELECT COUNT(DISTINCT session_id) as total FROM website_traffic WHERE {$where}");
     $unique = $uniqueVisitors->count() ? $uniqueVisitors->first()->total : 0;
 
+    // Countries count
+    $countriesCount = $db->query("SELECT COUNT(DISTINCT country) as total FROM website_traffic WHERE {$where} AND country IS NOT NULL AND country != ''");
+    $countries = $countriesCount->count() ? $countriesCount->first()->total : 0;
+
     // Previous period for comparison
     $prevIntervals = [
         'today' => 'DATE(visited_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)',
@@ -174,6 +253,7 @@ function getTrafficStats($db) {
         'data' => [
             'total_visits' => (int)$total,
             'unique_visitors' => (int)$unique,
+            'countries' => (int)$countries,
             'previous_visits' => (int)$prevTotal,
             'change_percent' => $change,
             'period' => $period
@@ -484,6 +564,197 @@ function getBrowserStats($db) {
     echo json_encode([
         'success' => true,
         'data' => $browsers
+    ]);
+}
+
+/**
+ * Get country statistics
+ */
+function getCountryStats($db) {
+    $period = $_GET['period'] ?? 'week';
+    $limit = (int)($_GET['limit'] ?? 10);
+    $limit = min(max($limit, 1), 50);
+
+    $intervals = [
+        'today' => 'DATE(visited_at) = CURDATE()',
+        'week' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+        'month' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+        'year' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)'
+    ];
+
+    $where = $intervals[$period] ?? $intervals['week'];
+
+    $data = $db->query("
+        SELECT
+            COALESCE(country, 'Unknown') as country,
+            COALESCE(country_code, 'XX') as country_code,
+            COUNT(*) as visits,
+            COUNT(DISTINCT session_id) as unique_visitors
+        FROM website_traffic
+        WHERE {$where}
+        GROUP BY country, country_code
+        ORDER BY visits DESC
+        LIMIT {$limit}
+    ");
+
+    $countries = [];
+    $total = 0;
+
+    if ($data->count() > 0) {
+        foreach ($data->results() as $row) {
+            $total += (int)$row->visits;
+        }
+
+        foreach ($data->results() as $row) {
+            $visits = (int)$row->visits;
+            $countries[] = [
+                'country' => $row->country ?: 'Unknown',
+                'country_code' => $row->country_code ?: 'XX',
+                'flag' => GeoIP::getFlag($row->country_code),
+                'visits' => $visits,
+                'unique_visitors' => (int)$row->unique_visitors,
+                'percentage' => $total > 0 ? round(($visits / $total) * 100, 1) : 0
+            ];
+        }
+    }
+
+    echo json_encode([
+        'success' => true,
+        'data' => $countries
+    ]);
+}
+
+/**
+ * Get city statistics
+ */
+function getCityStats($db) {
+    $period = $_GET['period'] ?? 'week';
+    $limit = (int)($_GET['limit'] ?? 10);
+    $limit = min(max($limit, 1), 50);
+    $country = $_GET['country'] ?? null;
+
+    $intervals = [
+        'today' => 'DATE(visited_at) = CURDATE()',
+        'week' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+        'month' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+        'year' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)'
+    ];
+
+    $where = $intervals[$period] ?? $intervals['week'];
+
+    if ($country) {
+        $where .= " AND country = " . $db->quote($country);
+    }
+
+    $data = $db->query("
+        SELECT
+            COALESCE(city, 'Unknown') as city,
+            COALESCE(country, 'Unknown') as country,
+            COALESCE(region, '') as region,
+            COUNT(*) as visits,
+            COUNT(DISTINCT session_id) as unique_visitors
+        FROM website_traffic
+        WHERE {$where} AND city IS NOT NULL AND city != ''
+        GROUP BY city, country, region
+        ORDER BY visits DESC
+        LIMIT {$limit}
+    ");
+
+    $cities = [];
+    if ($data->count() > 0) {
+        foreach ($data->results() as $row) {
+            $cities[] = [
+                'city' => $row->city,
+                'country' => $row->country,
+                'region' => $row->region,
+                'visits' => (int)$row->visits,
+                'unique_visitors' => (int)$row->unique_visitors
+            ];
+        }
+    }
+
+    echo json_encode([
+        'success' => true,
+        'data' => $cities
+    ]);
+}
+
+/**
+ * Get geo map data (for map visualization)
+ */
+function getGeoMapData($db) {
+    $period = $_GET['period'] ?? 'week';
+
+    $intervals = [
+        'today' => 'DATE(visited_at) = CURDATE()',
+        'week' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
+        'month' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+        'year' => 'visited_at >= DATE_SUB(NOW(), INTERVAL 1 YEAR)'
+    ];
+
+    $where = $intervals[$period] ?? $intervals['week'];
+
+    // Get country aggregates for choropleth map
+    $countryData = $db->query("
+        SELECT
+            COALESCE(country_code, 'XX') as code,
+            COALESCE(country, 'Unknown') as name,
+            COUNT(*) as value
+        FROM website_traffic
+        WHERE {$where} AND country_code IS NOT NULL
+        GROUP BY country_code, country
+        ORDER BY value DESC
+    ");
+
+    $countries = [];
+    if ($countryData->count() > 0) {
+        foreach ($countryData->results() as $row) {
+            $countries[] = [
+                'code' => $row->code,
+                'name' => $row->name,
+                'value' => (int)$row->value
+            ];
+        }
+    }
+
+    // Get point data for map markers (recent visits with coordinates)
+    $pointData = $db->query("
+        SELECT
+            city,
+            country,
+            latitude as lat,
+            longitude as lng,
+            COUNT(*) as visits
+        FROM website_traffic
+        WHERE {$where}
+            AND latitude IS NOT NULL
+            AND longitude IS NOT NULL
+        GROUP BY city, country, latitude, longitude
+        ORDER BY visits DESC
+        LIMIT 100
+    ");
+
+    $points = [];
+    if ($pointData->count() > 0) {
+        foreach ($pointData->results() as $row) {
+            if ($row->lat && $row->lng) {
+                $points[] = [
+                    'city' => $row->city,
+                    'country' => $row->country,
+                    'lat' => (float)$row->lat,
+                    'lng' => (float)$row->lng,
+                    'visits' => (int)$row->visits
+                ];
+            }
+        }
+    }
+
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'countries' => $countries,
+            'points' => $points
+        ]
     ]);
 }
 ?>

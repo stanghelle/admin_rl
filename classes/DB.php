@@ -158,4 +158,8 @@ class DB {
 	public function error() {
 		return $this->_error;
 	}
+
+	public function quote($string) {
+		return $this->_pdo->quote($string);
+	}
 }
